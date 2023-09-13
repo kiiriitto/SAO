@@ -1,0 +1,290 @@
+from tkinter import *
+from tkinter import filedialog
+from tkinter import messagebox
+from tkinter import ttk
+from enum import Enum
+import os
+
+from config import save_config, load_config
+from traitement import load_data, is_dim_ok, load_calculation_context, organize_data, reduce_data, compute_kelvin_temp, save_tecplot_file, compute_x_y, file_exist
+
+
+
+WINDOW_WIDTH = 600
+WINDOW_HEIGHT = 500
+DEFAULT_PADDING = 5
+
+class FileType(Enum):
+    TEXT = 0
+    CALIBRATION = 1
+
+# Methodes
+def create_output_file():
+
+    """Traitement et génération du fichier de sortie.
+        Gestion des erreurs.
+    """
+    if check_if_empty_fields():
+        messagebox.showwarning(title="Erreur de saisie", message="Un champ n'est pas saisie")
+        return
+
+    if not file_exist(measurements_file_path.get()):
+        messagebox.showwarning(title="Erreur fichier d'entrée", message="Impossible d'accéder au fichier d'entrée.")
+        return
+
+    data_is_loaded, data = load_data(measurements_file_path.get())
+    if not data_is_loaded:
+        messagebox.showwarning(title="Erreur fichier d'entrée", message="Impossible de lire le fichier d'entrée.")
+        return
+    
+    if not is_dim_ok(data, x_dim.get(), y_dim.get()):
+        messagebox.showwarning(title="Erreur maillage", message="Le nombre de mesures ne correspond pas au maillage sélectionné.")
+        return
+    
+    ctx_is_loaded, calculation_ctx = load_calculation_context(calibration_files)
+    if not ctx_is_loaded:
+        messagebox.showwarning(title="Erreur fichier de calibration", message="Impossible de charger le fichier de calibration.")
+        return
+    
+    data = organize_data(data, x_dim.get(), y_dim.get())
+
+    data = compute_x_y(data)
+
+    data = reduce_data(data, calculation_ctx)
+
+    data = compute_kelvin_temp(data)
+
+    if not save_tecplot_file(data, output_file_path.get(), output_file_name.get(), x_dim.get(), y_dim.get()):
+        messagebox.showwarning(title="Erreur fichier de sortie", message="Impossible de générer le fichier Tecplot.")
+        return
+    
+    else:
+        messagebox.showinfo(title="Fichier créé", message="Succès, fichier créé.")
+
+def check_if_empty_fields() -> bool:
+    """Vérifie si un champ n'est pas saisie.
+
+    Returns:
+        bool: True si un champ est vide, sinon False
+    """
+    if measurements_file_path.get() == "":
+        return True
+    
+    if x_dim.get() == None or x_dim.get() == "":
+        return True
+    
+    if y_dim.get() == None or y_dim.get() == "":
+        return True
+    
+    if not calibration_files:
+        return True
+    
+    if output_file_path.get() == "":
+        return True
+    
+    if output_file_name.get() == "":
+        return True
+    return False
+
+def browse_file(file_type : FileType) -> str:
+    """Ouvre un navigateur de fichier avec un filtre en fonction de file_type.
+
+    Args:
+        file_type (FileType): Le type de fichier
+
+    Returns:
+        str: Le chmin du fichier sélectionné. "" si aucun.
+    """
+    if file_type == FileType.TEXT:
+        filename = filedialog.askopenfilename(initialdir = measurements_file_path.get(),
+                                            title = "Selectionner un fichier texte",
+                                            filetypes = (("Fichier texte", "*.txt"),))
+        if filename == "":
+            return
+        measurements_file_path.set(filename)
+        output_file_name.set(os.path.splitext(os.path.basename(filename))[0])
+    elif file_type == FileType.CALIBRATION:
+        last_dir = calibration_files[-1] if len(calibration_files) > 0 else ""
+        filenames = filedialog.askopenfilename(initialdir = last_dir,
+                                            title = "Selectionner un fichier de calibration",
+                                            filetypes = (("Fichier de calibration", "*.cal"),),
+                                            multiple=True)
+        if filenames == "":
+            return
+        for filename in filenames:
+            if filename not in calibration_files:
+                calibration_files.append(filename)
+                files_var.set(calibration_files)
+
+def browse_dir() -> str:
+    """Ouvre un navigateur de dossier et retourne le chemin selectionné.
+
+    Returns:
+        str: Le chemin sélectionné. "" si aucun.
+    """
+    dirname = filedialog.askdirectory()
+    if dirname == "":
+        return
+    output_file_path.set(dirname)
+
+def remove_file():
+    """Supprime le fichier sélectionné de la listbox.
+    """
+    if len(calibration_files_lb.curselection()) > 0:
+        calibration_files.pop(calibration_files_lb.curselection()[0])
+        files_var.set(calibration_files)
+
+def is_a_number(input) -> bool:
+    """Vérifie si le dernier caractère de la chaine de caractère est un numérique.
+
+    Args:
+        input (string): Chaine de caractères
+
+    Returns:
+        bool: True si le caractère est numérique.
+    """
+    if input.isdigit():
+        return True                  
+    elif input == "":
+        return True
+    else:
+        return False
+
+def is_a_valid_char(input) -> bool:
+    """Vérifie que le dernier caractère n'est pas dans la liste des caractère non autorisé par Windows.
+
+    Args:
+        input (_type_): La chaine de caractère
+
+    Returns:
+        bool: True si le dernier charactère n'estpas dans la liste
+    """
+    if input == "":
+        return True
+    elif input[-1] not in ['\\', '/', ':', '*', '?', '"', '<', '>', '|']:
+        return True
+    else:
+        return False
+
+if __name__ == '__main__':
+    ################### GUI ###################
+    root = Tk()
+    root.title("Soft Python Sonde 5T")
+    root.geometry(f'{WINDOW_WIDTH}x{WINDOW_HEIGHT}+{int((root.winfo_screenwidth() - WINDOW_WIDTH)/2)}+{int((root.winfo_screenheight() - WINDOW_HEIGHT)/2)}')
+    root.resizable(False, False)
+
+    mainframe = ttk.Frame(root, padding=DEFAULT_PADDING)
+    mainframe.grid(column=0, row=0, sticky=(N, W, E, S))
+    root.columnconfigure(0, weight=1)
+    root.rowconfigure(0, weight=1)
+
+    icon = PhotoImage(file = 'img/safran.png')
+    root.iconphoto(False, icon)
+
+
+    ################### FICHIER D'ENTREE ###################
+    measurements_file_frame = ttk.LabelFrame(mainframe, text="Fichier d'entrée")
+    measurements_file_frame.grid(column=1, row=1, sticky=(N, W, E, S))
+
+    measurements_file_path = StringVar()
+    ttk.Label(measurements_file_frame, textvariable=measurements_file_path, width=85).grid(column=1, row=1, sticky=(W, E))
+
+    ttk.Button(measurements_file_frame, text="...", command=lambda: browse_file(FileType.TEXT), width=5).grid(column=2, row=1, sticky=(E))
+
+
+    ################### DIMENSIONS ###################
+    dimensions_frame = ttk.LabelFrame(mainframe, text="Dimensions")
+    dimensions_frame.grid(column=1, row=2, sticky=(N, W, E, S))
+
+    ttk.Label(dimensions_frame, text="X : ", width=3).grid(column=1, row=1, sticky=(W, E))
+    ttk.Label(dimensions_frame, text="Y : ", width=3).grid(column=3, row=1, sticky=(W, E))
+
+    x_dim = IntVar()
+    x_dim.set(1)
+    x_dim_entry = ttk.Entry(dimensions_frame, width=5, textvariable=x_dim)
+    x_dim_entry.grid(column=2, row=1, sticky=(W, E))
+
+    y_dim = IntVar()
+    y_dim.set(1)
+    y_dim_entry = ttk.Entry(dimensions_frame, width=5, textvariable=y_dim)
+    y_dim_entry.grid(column=4, row=1, sticky=(W, E))
+
+    is_digit_command = dimensions_frame.register(is_a_number)
+    x_dim_entry.config(validate="key", validatecommand=(is_digit_command, '%P'))
+    y_dim_entry.config(validate="key", validatecommand=(is_digit_command, '%P'))
+
+
+    ################### FICHIERS DE CALIBRATION ###################
+    calibration_files_frame = ttk.LabelFrame(mainframe, text="Fichiers de calibration")
+    calibration_files_frame.grid(column=1, row=3, sticky=(N, W, E, S))
+
+    calibration_files = []
+    files_var = StringVar(value=calibration_files)
+    calibration_files_lb = Listbox(calibration_files_frame, listvariable=files_var, width=92)
+    calibration_files_lb.grid(column=1, row=1, columnspan=2, sticky=(W, E))
+
+    ttk.Button(calibration_files_frame, text="Ajouter", command=lambda: browse_file(FileType.CALIBRATION), width=10).grid(column=1, row=2)
+    ttk.Button(calibration_files_frame, text="Supprimer", command=remove_file, width=10).grid(column=2, row=2)
+
+
+    ################### FICHIER DE SORTIE ###################
+    output_file_frame = ttk.LabelFrame(mainframe, text="Fichier de sortie")
+    output_file_frame.grid(column=1, row=4, sticky=(N, W, E, S))
+
+    ttk.Label(output_file_frame, text="Chemin : ", width=10).grid(column=1, row=1, sticky=(W, E))
+
+    output_file_path = StringVar()
+    output_file_path_label = ttk.Label(output_file_frame, textvariable=output_file_path, width=73).grid(column=2, row=1, sticky=(W, E))
+
+    ttk.Button(output_file_frame, text="...", command=browse_dir, width=5).grid(column=3, row=1, sticky=(E))
+
+    ttk.Label(output_file_frame, text="Nom : ", width=10).grid(column=1, row=2, sticky=(W, E))
+
+    output_file_name = StringVar()
+    output_file_name_entry = ttk.Entry(output_file_frame, textvariable=output_file_name)
+    output_file_name_entry.grid(column=2, row=2, sticky=(W, E))
+
+    is_valid_char_command = dimensions_frame.register(is_a_valid_char)
+    output_file_name_entry.config(validate="key", validatecommand=(is_valid_char_command, '%P'))
+
+
+    ################### GENERER ###################
+    ttk.Button(mainframe, text="Générer", command=create_output_file, width=10).grid(column=1, row=5)
+
+
+    ################### PADDING ###################
+    for child in mainframe.winfo_children(): 
+        child.grid_configure(padx=DEFAULT_PADDING, pady=DEFAULT_PADDING)
+        for child2 in child.winfo_children():
+            child2.grid_configure(padx=DEFAULT_PADDING, pady=DEFAULT_PADDING)
+
+
+    ################### CHARGER LA CONFIG ###################
+    config = load_config()
+    if config != {}:
+        if config['fichier des mesures'].split('.')[-1] == "txt" and os.path.exists(config['fichier des mesures']):
+            measurements_file_path.set(config['fichier des mesures'])
+        if isinstance(config['x'], int) and config['x'] > 0:
+            x_dim.set(config['x'])
+        else:
+            x_dim.set(1)
+        if isinstance(config['y'], int) and config['x'] > 0:
+            y_dim.set(config['y'])
+        else:
+            y_dim.set(1)
+        for file in config['fichiers de calibration']:
+            if file.split('.')[-1] == "cal" and os.path.exists(file):
+                calibration_files.append(file)
+        files_var.set(calibration_files)
+        if os.path.exists(config['chemin du fichier de sortie']):
+            output_file_path.set(config['chemin du fichier de sortie'])
+        if all(char not in config['nom du fichier de sortie'] for char in ['\\', '/', ':', '*', '?', '"', '<', '>', '|']):
+            output_file_name.set(config['nom du fichier de sortie'])
+
+    root.mainloop()
+
+    ################### SAUVEGARDER LA CONFIG ###################
+    if not save_config(measurements_file_path.get(), x_dim.get(), y_dim.get(), calibration_files, output_file_path.get(), output_file_name.get()):
+        messagebox.showwarning(title="Sauvegarde impossible", message="Impossible de sauvegarder les préférences.")
+
+
