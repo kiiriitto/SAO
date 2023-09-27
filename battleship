@@ -1,0 +1,378 @@
+"""
+Battleship
+"""
+
+import game_functions as gf
+from game_functions import Game
+from player import Player
+
+import pickle  # For saving objects.
+import sys
+from itertools import permutations
+
+def main():
+    gf.print_options()
+    while True:
+        option = input("Select an option. ")
+        if option in ['1', '2', '3']:
+            break
+        else:
+            print('Enter a valid option!\n')
+
+    if option == '1':
+        player1 = Player(input("Player 1, enter your name please: "))
+        player2 = Player(input("Player 2, enter your name please: "))
+
+        # Start a game
+        game = Game(player1, player2)
+        game.starting_up(player1, player2)
+        game.starting_up(player2, player1)
+
+        # For making test players, uncomment these lines.
+        # with open('test_players.pkl', 'wb') as output:
+        #     pickle.dump(game, output, pickle.HIGHEST_PROTOCOL)
+
+        run_switch(player1, player2, game)
+
+    elif option == '2':
+        player1 = Player(input("Player 1, enter your name please: "))
+        cpu = Player("CPU", iscpu=True)
+
+        game = Game(player1, cpu)
+        game.starting_up(player1, cpu)
+        game.starting_up_cpu(cpu)
+
+        game.player1.draw_boards(player1, cpu)
+        game.player2.draw_boards(cpu, player1)
+
+        run_switch(player1, cpu, game)
+
+    elif option == '3':
+        # Import pre-initialized game.
+        with open('test_players.pkl', 'rb') as infile:
+            game = pickle.load(infile)
+
+        run_switch(game.player1, game.player2, game)
+
+def run_switch(player1, player2, game):
+    players = (player1, player2)
+    while True:
+        for own, opponent in permutations(players):
+            if not player2.isCPU:
+                game.make_move(own, opponent)
+                if opponent.warships:
+                    input("Switch players please! ")
+            else:
+                game.make_move_cpu(own, opponent)
+            if not opponent.warships:
+                if game.victory(own):
+                    main()
+                else:
+                    sys.exit()
+
+if __name__ == '__main__':
+    main()
+
+
+"""
+board
+"""
+from box import Box
+
+class Board(Box):
+    def __init__(self):
+        """Initialize the board empty."""
+        self.board = []
+        self.hitted_not_sunk = [] #Only for CPU
+        for row in range(10):
+            line = []
+            for column in range(10):
+                element = Box('.', (row, column))
+                line.append(element)
+            self.board.append(line)
+
+    def print_board(self, person):
+        """Print out board."""
+        print("    A B C D E F G H I J")
+        index = 1
+        for line in self.board:
+            if index != 10:
+                end = '   '
+            else:
+                end = '  '
+            print(index, end = end)
+            index += 1
+            for element in line:
+                if (element.symbol != '.' and element.is_visible == True) or person == 'own':
+                    print(element.symbol, end = " ")
+                else:
+                    print(end = ". ")
+            print('')
+        print('')
+
+    def find_coordinate(self, coordinate):
+        """Find the box object corresponding with that coordinate."""
+        for line in self.board:
+            for element in line:
+                if element.place == coordinate:
+                    return element
+
+
+"""
+box
+"""
+class Box():
+    def __init__(self, symbol, place):
+        self.hit = False
+        self.symbol = symbol
+        self.place = place
+        self.is_visible = False
+
+    def change_to_ship(self):
+        """Change box from '.' to '@'."""
+        self.symbol = '@'
+
+    def change_to_sunk(self):
+        self.symbol = 'X'
+
+
+"""
+game_functions
+"""
+import time
+import random
+
+import helper
+
+class Game():
+    def __init__(self, player1, player2):
+        self.player1 = player1
+        self.player2 = player2
+
+    def starting_up(self, own, opponent):
+        """Initialize own board."""
+        helper.clear()
+        ship_list = [("Destroyer", 2), ("Submarine", 3), ("Cruiser", 3), ('Battleship', 4), ('Carrier', 5)]
+
+        input(own.name + ", press Enter if you're ready. ")
+        for ship in reversed(ship_list):
+            succesful = False
+            while not succesful:
+                helper.clear()
+                own.draw_boards(own, opponent)
+                position = insert_position(own, ship, starting = True)
+                direction = insert_direction()
+
+                if check_if_possible(own, position, direction, ship):
+                    succesful = True
+                    own.draw_ship(position, direction, ship)
+                else:
+                    print("\nIt's not possible to place a ship here. Please chose an other location.\n")
+                    time.sleep(2)
+        helper.clear()
+        own.draw_boards(own, opponent)
+        time.sleep(1)
+
+    def make_move(self, own, opponent):
+        succesful = False
+        while not succesful:
+            helper.clear() #Best to comment this line for testing
+            own.draw_boards(own, opponent)
+            position = insert_position(own, ship = None, starting = False)
+            coordinate = convert_position(position)
+            if check_if_first_time(coordinate, opponent):
+                succesful = True
+            else:
+                print('Please enter a non-chosen position.')
+                time.sleep(1)
+
+        helper.clear() #Best to comment this line for testing
+        if opponent.check_if_hit(coordinate):
+            print('Hit!')
+        else:
+            print('Miss!')
+        ships_name = opponent.check_if_sunk()
+        if ships_name:
+            print(ships_name + ' sunked!')
+        time.sleep(1)
+        own.draw_boards(own, opponent)
+        time.sleep(1)
+
+    def victory(self, own):
+        helper.clear()
+        if own.name != 'CPU':
+            print("Congratulations " + own.name + ", you've won.")
+        else:
+            print('Unfortunately, but the computer did beat you...')
+        while True:
+            new_game = input("Do you want to play a new game? (y, n) ").lower()
+            if new_game == 'y':
+                return True
+            elif new_game == 'n':
+                return False
+            else:
+                print('Enter a valid option!\n')
+
+    def starting_up_cpu(self, cpu):
+        """Initialize cpu's board."""
+        ship_list = [("Destroyer", 2), ("Submarine", 3), ("Cruiser", 3), ('Battleship', 4), ('Carrier', 5)]
+
+        for ship in reversed(ship_list):
+            succesful = False
+            while not succesful:
+                letters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
+                letter = letters[random.randint(0, 9)]
+                number = str(random.randint(1, 10))
+                position = letter + number
+
+                directions = ['h', 'v']
+                direction = directions[random.randint(0,1)]
+
+                if check_if_possible(cpu, position, direction, ship):
+                    succesful = True
+                    cpu.draw_ship(position, direction, ship)
+
+    def make_move_cpu(self, cpu, opponent):
+        None #Work in progress
+
+
+def check_if_possible(player, position, direction, ship):
+    """Check if it is possible to place a ship here."""
+    row, column = convert_position(position)
+    for length in range(ship[1]):
+        if direction == 'h':
+            if column + length >= 10 or player.board_obj.board[row][column + length].symbol != '.':
+                return False
+        else:
+            if row + length >= 10 or player.board_obj.board[row + length][column].symbol != '.':
+                return False
+    return True
+
+def convert_position(position):
+    """Convert position to 'absolute' position! (B7 becomes (1, 6))"""
+    letter = position[0]
+    column = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].index(letter)
+    row = int(position[1:]) - 1
+    return row, column
+
+def insert_position(player, ship, starting):
+    """Insert a valid position (e.g. B2)."""
+    while True:
+        if starting:
+            position = input(player.name +  ", where do you want to place your " + ship[0] + "(" + str(ship[1]) + ")? ").upper()
+        else:
+            position = input(player.name +  ", where do you want to shoot? ").upper()
+        try:
+            if (position[0] in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']) and (int(position[1:]) in range(1, 11)):
+                return position
+            else:
+                print("Please insert a valid position.\n")
+        except:
+            print("Please insert a valid position.\n")
+
+def insert_direction():
+    """Insert a valid direction."""
+    while True:
+        direction = input("Do you want to place it horizontal or vertical? (h, v) ").lower()
+        try:
+            if direction in ['h', 'v']:
+                return direction
+            else:
+                print("Please insert a valid direction.\n")
+        except:
+            print("Please insert a valid direction.\n")
+
+def check_if_first_time(coordinate, opponent):
+    place = opponent.board_obj.find_coordinate(coordinate)
+    if place.symbol == '@' or place.symbol == '.':
+        return True
+    else:
+        return False
+
+def print_options():
+    print("""
+Option 1: Duo player mode
+Option 2: Single player mode (In progress...)
+Option 3: Pre-initialized players
+    """)
+
+
+"""
+helper
+"""
+import os
+import platform
+
+
+def isWindows():
+    """Check if running on windows"""
+    return platform.system().lower() == 'windows'
+
+def clear():
+    """clear console output"""
+    if isWindows():
+        os.system('cls')
+    else:
+        os.system('clear')
+
+
+
+"""
+player
+"""
+from board import Board
+import game_functions as gf
+from ship import Ship
+
+import time
+import collections
+
+class Player():
+    def __init__(self, name, iscpu=False):
+        self.warships = []
+        self.name = name
+        self.isCPU = iscpu
+        self.board_obj = Board()
+
+    def draw_ship(self, position, direction, ship):
+        """Create a new ship, draw it and append it to warships."""
+        row, column = gf.convert_position(position)
+        coordinates = []
+        for length in range(ship[1]):
+            if direction == 'h':
+                coordinates.append((row, column + length))
+            else:
+                coordinates.append((row + length, column))
+        new_ship = Ship(self.board_obj, coordinates, ship[0])
+        new_ship.change_boxes_to_ship()
+        self.warships.append(new_ship)
+
+    def draw_boards(self, own, opponent):
+        """Draw the board of the enemy first, then own board."""
+        print("Enemy's board:")
+        opponent.board_obj.print_board("enemy")
+        print("Own board:")
+        self.board_obj.print_board("own")
+
+    def check_if_hit(self, coordinate):
+        element = self.board_obj.find_coordinate(coordinate)
+        if element.symbol == '@':
+            element.symbol = 'X'
+            element.is_visible = True
+            for ship in self.warships:
+                for coor in ship.coordinates:
+                    if coor == element:
+                        ship.sunk_coordinates.append(element)
+            return True
+
+        else:
+            element.symbol = 'O'
+            element.is_visible = True
+            return False
+
+    def check_if_sunk(self):
+        for ship in self.warships:
+            if collections.Counter(ship.coordinates) == collections.Counter(ship.sunk_coordinates):
+                ship.change_boxes_to_sunk()
+                self.warships.remove(ship)
+                return ship.name
